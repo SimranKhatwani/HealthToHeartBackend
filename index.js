@@ -44,6 +44,36 @@ require("dotenv").config();
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+app.get("/api/health", (req, res) => {
+  const dbState = mongoose.connection.readyState;
+
+  const dbStatus = {
+    0: "disconnected",
+    1: "connected",
+    2: "connecting",
+    3: "disconnecting",
+  };
+
+  res.status(dbState === 1 ? 200 : 503).json({
+    success: dbState === 1,
+    message: dbState === 1
+      ? "Server and database are working"
+      : "Server is running but database is not connected",
+
+    server: {
+      status: "running",
+      environment: process.env.NODE_ENV || "development",
+      timestamp: new Date().toISOString()
+    },
+
+    database: {
+      status: dbStatus[dbState] || "unknown",
+      name: mongoose.connection.name || null,
+      host: mongoose.connection.host || null
+    }
+  });
+});
+
 // Middleware
 app.use(express.json());
 app.use(fileUpload());
@@ -52,7 +82,11 @@ app.use(cookieParser());
 const allowedOrigins = [
   'http://localhost:5173',
   "http://localhost:5000",
+<<<<<<< HEAD
 
+=======
+  "https://health-to-heart-frontend.vercel.app"
+>>>>>>> 8150d292954717332ef91f9f2ac83b6ba9409980
 ];
 
 app.use(cors({
