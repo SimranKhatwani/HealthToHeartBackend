@@ -35,7 +35,7 @@ const NotificationRoutes = require("./routes/NotificationRoutes");
 const PermissionRoutes = require("./routes/PermissionRoute")
 const socket = require("socket.io");
 const ReportRoutes = require("./routes/ReportRoutes");
-const aiDiagnosticRoutes  = require("./routes/aiDiagnosticRoutes");
+const aiDiagnosticRoutes = require("./routes/aiDiagnosticRoutes");
 const BillingRoutes = require("./routes/BillingRoutes");
 const MessagesRoutes = require("./routes/MessageRoutes");
 
@@ -52,6 +52,7 @@ app.use(cookieParser());
 const allowedOrigins = [
   'http://localhost:5173',
   "http://localhost:5000",
+
 ];
 
 app.use(cors({
@@ -61,15 +62,15 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 
-app.use("/api/operations",OperationRoutes)
-app.use("/api/organization",OrganizationRoutes);
-app.use("/api/roles",RoleRoutes);
-app.use("/api/medicalstaff",MedicalStaffRoutes);
-app.use("/api/auth",AuthRoutes);
-app.use("/api/MospiltalAdmin",AdminsRoutes);
-app.use("/api/patients",PatientRoutes);
-app.use("/api/schedules",ScheduleRoutes)
-app.use("/api/blood-bank",BloodBankRoutes)
+app.use("/api/operations", OperationRoutes)
+app.use("/api/organization", OrganizationRoutes);
+app.use("/api/roles", RoleRoutes);
+app.use("/api/medicalstaff", MedicalStaffRoutes);
+app.use("/api/auth", AuthRoutes);
+app.use("/api/MospiltalAdmin", AdminsRoutes);
+app.use("/api/patients", PatientRoutes);
+app.use("/api/schedules", ScheduleRoutes)
+app.use("/api/blood-bank", BloodBankRoutes)
 app.use("/api/inventory", InventoryRoutes)
 app.use("/api/appointments", AppointmentRoutes)
 app.use("/api/prescription", PrescriptionRoutes)
@@ -80,16 +81,16 @@ app.use("/api/utills", UtillsRoutes)
 app.use("/api/otp", otpRoutes);
 app.use("/api/pending-appointments", PendingAppointmentsRoutes);
 app.use("/api/meal-plans", MealPlansRoutes);
-app.use("/api/gen-ai-rotes", GenAiRotes );
+app.use("/api/gen-ai-rotes", GenAiRotes);
 app.use("/api/labtests", labTestRoutes);
 app.use("/api/report", TestReportRoutes);
 app.use("/api/diagnostics", aiDiagnosticRoutes);
-app.use("/api/room", RoomRoutes );
-app.use("/api/notification", NotificationRoutes );
-app.use("/api/permission", PermissionRoutes );
-app.use("/api/reports", ReportRoutes );
-app.use("/api/billing", BillingRoutes );
-app.use("/api/message", MessagesRoutes );
+app.use("/api/room", RoomRoutes);
+app.use("/api/notification", NotificationRoutes);
+app.use("/api/permission", PermissionRoutes);
+app.use("/api/reports", ReportRoutes);
+app.use("/api/billing", BillingRoutes);
+app.use("/api/message", MessagesRoutes);
 
 
 // Connect to MongoDB
@@ -105,19 +106,19 @@ const connectToDb = async () => {
 
 
 // Start the server
-  connectToDb().then(() => {
-    const server = app.listen(PORT, () => {
-      console.log(`Server running on http://localhost:${PORT}`);
-    });
+connectToDb().then(() => {
+  const server = app.listen(PORT, () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+  });
 
-    const io = socket(server, {
-      cors: {
-        origin: "http://localhost:5173", // no trailing slash
-        methods: ["GET", "POST"],
-        allowedHeaders: ["Content-Type"],
-        credentials: true,
-      },
-    });
+  const io = socket(server, {
+    cors: {
+      origin: "http://localhost:5173", // no trailing slash
+      methods: ["GET", "POST"],
+      allowedHeaders: ["Content-Type"],
+      credentials: true,
+    },
+  });
 
   global.onlineUsers = new Map();
 
@@ -205,9 +206,9 @@ const connectToDb = async () => {
 
     socket.on("notification-sent", (data) => {
       // console.log("data", data)
-      const sendUserSocket = Array.isArray(data.to) 
-      ? data.to.map(userId => onlineUsers.get(userId)) 
-      : onlineUsers.get(data.to);
+      const sendUserSocket = Array.isArray(data.to)
+        ? data.to.map(userId => onlineUsers.get(userId))
+        : onlineUsers.get(data.to);
       if (sendUserSocket) {
         io.to(sendUserSocket).emit("notification-received", {
           message: data.message,
@@ -220,9 +221,9 @@ const connectToDb = async () => {
 
     socket.on("message-sent", (data) => {
       // console.log("data", data)
-      const sendUserSocket = Array.isArray(data.to) 
-      ? data.to.map(userId => onlineUsers.get(userId)) 
-      : onlineUsers.get(data.to);
+      const sendUserSocket = Array.isArray(data.to)
+        ? data.to.map(userId => onlineUsers.get(userId))
+        : onlineUsers.get(data.to);
       if (sendUserSocket) {
         io.to(sendUserSocket).emit("message-received", {
           message: data.message,
@@ -232,6 +233,6 @@ const connectToDb = async () => {
       }
     });
   });
-  });
+});
 
 
