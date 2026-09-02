@@ -1,4 +1,4 @@
-const bcrypt = require("bcrypt");   
+const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const MedicalStaffSchema = require("../models/MedicalStaff");
 const SuperAdminSchema = require("../models/SuperAdmin");
@@ -12,7 +12,7 @@ const loginStaffController = async (req, res) => {
 
         // Check if user is SuperAdmin
         user = await SuperAdminSchema.findOne({ email });
-        if (user){
+        if (user) {
             roleName = user.role;
         };
 
@@ -41,12 +41,13 @@ const loginStaffController = async (req, res) => {
         const token = jwt.sign(
             { userId: user._id, role: roleName, org_id: user.org_id || null },
             process.env.JWT_SECRET,
-            {expiresIn: "1h" }
+            { expiresIn: "1h" }
         );
 
         res.cookie('token', token, {
             httpOnly: true,
-            secure: false,
+            secure: process.env.NODE_ENV === "production",
+            sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
             maxAge: 1000 * 60 * 60 * 1
         })
         // res.cookie("token", token, {

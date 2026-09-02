@@ -82,11 +82,8 @@ app.use(cookieParser());
 const allowedOrigins = [
   'http://localhost:5173',
   "http://localhost:5000",
-<<<<<<< HEAD
-
-=======
   "https://health-to-heart-frontend.vercel.app"
->>>>>>> 8150d292954717332ef91f9f2ac83b6ba9409980
+
 ];
 
 app.use(cors({
