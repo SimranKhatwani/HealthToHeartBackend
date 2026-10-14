@@ -23,6 +23,7 @@ const PrescriptionRoutes = require("./routes/Prescription");
 const UtillsRoutes = require("./routes/UtillsRoutes");
 const ShiftsRoutes = require("./routes/ShiftsRoutes");
 const InsuranceRoutes = require("./routes/InsuranceRoutes");
+const abhaRoutes = require("./routes/abhaRoutes");
 
 const otpRoutes = require("./routes/otpRoutes");
 const PendingAppointmentsRoutes = require("./routes/PendingAppointmentsRoutes");
@@ -107,6 +108,7 @@ app.use("/api/appointments", AppointmentRoutes)
 app.use("/api/prescription", PrescriptionRoutes)
 app.use("/api/shift", ShiftsRoutes)
 app.use("/api/insurance", InsuranceRoutes)
+app.use("/api/abha", abhaRoutes);
 app.use("/api/utills", UtillsRoutes)
 
 app.use("/api/otp", otpRoutes);

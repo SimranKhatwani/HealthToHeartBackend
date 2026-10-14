@@ -56,6 +56,12 @@ const AbhaVerificationSessionSchema = new mongoose.Schema(
             default: null,
         },
 
+        // Temporary user auth token (X-Token) returned by ABDM upon OTP confirmation
+        userAuthToken: {
+            type: String,
+            default: null,
+        },
+
         // Ephemeral demographic profile returned by official ABDM gateway upon successful verification
         // Stored only temporarily until staff links the profile to a patient record or session expires
         verifiedProfile: {

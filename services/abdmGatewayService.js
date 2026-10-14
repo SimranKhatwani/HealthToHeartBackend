@@ -1,26 +1,35 @@
 /**
  * ABDM Gateway Service
  * 
- * Reusable internal service layer designed for future ABDM Gateway communication.
- * Manages gateway session token caching, authentication requests, and error normalization.
+ * Reusable internal service layer for communication with the official ABDM (Ayushman Bharat Digital Mission)
+ * Gateway / Health ID v1 APIs.
  * 
- * STATUS: PENDING SANDBOX APPROVAL
- * - Live network communication is intentionally disabled until approved client credentials
- *   and verified official ABDM API specifications are provided.
- * - This service provides architectural scaffolding, contract definitions, and safe error handling.
+ * FINALIZED API SCOPE (v1 Legacy Specification):
+ * 1. v1/search/searchByHealthId    - Search for an existing ABHA account by Health ID / ABHA Address
+ * 2. v1/auth/init                  - Initiate authentication (e.g., requesting Mobile or Aadhaar OTP)
+ * 3. v1/auth/confirmWithMobileOTP  - Complete authentication by submitting Mobile OTP
+ * 4. v1/auth/confirmWithAadhaarOtp - Alternative authentication by submitting Aadhaar OTP
+ * 5. v1/account/profile            - Retrieve verified patient profile using the X-Token post-auth
+ * 6. v1/auth/cert                  - Obtain the gateway public certificate for encryption flows
+ * 
+ * SECURITY & INTEGRITY CONSTRAINTS:
+ * - Credentials and tokens are kept strictly server-side.
+ * - OTP values are NEVER logged, printed, or persisted in application logs.
+ * - When sandbox credentials are not configured in .env, live network calls are safely blocked.
+ * - Does not invent fake patient data or simulate verification when sandbox is offline.
  */
 
 const { getAbdmConfig, isAbdmConfigured } = require("../config/abdmConfig");
 
 class AbdmGatewayService {
     constructor() {
-        this.cachedToken = null;
+        this.cachedGatewayToken = null;
         this.tokenExpiresAt = null;
     }
 
     /**
-     * Standardized error response formatter for ABDM operations.
-     * Sanitizes errors to prevent exposing API secrets, raw tokens, or stack traces.
+     * Standardized error response formatter for ABDM gateway operations.
+     * Sanitizes errors to prevent leaking API secrets, raw tokens, or stack traces.
      * 
      * @param {string} code - Internal machine-readable error code
      * @param {string} message - Safe user-facing message
@@ -40,164 +49,313 @@ class AbdmGatewayService {
     }
 
     /**
-     * Retrieves or refreshes the ABDM Gateway session bearer token.
-     * In the official ABDM specification, client applications exchange their clientId
-     * and clientSecret at the gateway session endpoint (e.g., /v0.5/sessions) to receive
-     * a temporary access token.
+     * Resolves the gateway endpoint URL for a given relative path.
      * 
-     * STATUS: UNIMPLEMENTED (Awaiting official sandbox credentials)
+     * @param {string} relativePath - Path such as 'v1/search/searchByHealthId'
+     * @returns {string} Fully qualified gateway URL
+     */
+    _resolveUrl(relativePath) {
+        const config = getAbdmConfig();
+        const base = config.gatewayBaseUrl.replace(/\/+$/, "");
+        const path = relativePath.replace(/^\/+/, "");
+        return `${base}/${path}`;
+    }
+
+    /**
+     * Obtains or refreshes the gateway session bearer token.
+     * In the ABDM protocol, hospitals exchange client credentials (clientId, clientSecret)
+     * at the session endpoint to obtain a short-lived Bearer token for gateway calls.
      * 
-     * @returns {Promise<string>} The gateway access token
-     * @throws {Error} When sandbox credentials are not configured or call fails
+     * @returns {Promise<{ success: boolean, token?: string, error?: Object }>}
      */
     async getGatewaySessionToken() {
         if (!isAbdmConfigured()) {
-            throw new Error(
-                "ABDM Gateway credentials are not configured. Action is pending NHA sandbox registration approval."
+            return this._createError(
+                "ABDM_NOT_CONFIGURED",
+                "ABDM Gateway credentials are not configured in environment variables. Live gateway calls are blocked pending sandbox approval."
             );
         }
 
-        // Check if an existing in-memory token is still valid (with a 60-second safety margin)
         const now = Date.now();
-        if (this.cachedToken && this.tokenExpiresAt && this.tokenExpiresAt - now > 60000) {
-            return this.cachedToken;
+        // Return cached token if valid with at least 60 seconds buffer
+        if (this.cachedGatewayToken && this.tokenExpiresAt && (this.tokenExpiresAt - now > 60000)) {
+            return { success: true, token: this.cachedGatewayToken };
         }
 
-        /**
-         * PENDING OFFICIAL VERIFICATION:
-         * Once sandbox approval is granted:
-         * 1. Send POST request to `${config.gatewayBaseUrl}/v0.5/sessions`
-         *    Body: { clientId: config.clientId, clientSecret: config.clientSecret }
-         * 2. Cache `accessToken` and calculate `expiresIn`.
-         * 3. Return `accessToken`.
-         * 
-         * No live network call is executed here.
-         */
-        throw new Error(
-            "ABDM Gateway token generation is pending official sandbox approval and endpoint contract verification."
-        );
+        const config = getAbdmConfig();
+        const sessionUrl = this._resolveUrl("v1/sessions");
+
+        try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), config.requestTimeoutMs);
+
+            const response = await fetch(sessionUrl, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Accept": "application/json"
+                },
+                body: JSON.stringify({
+                    clientId: config.clientId,
+                    clientSecret: config.clientSecret
+                }),
+                signal: controller.signal
+            });
+
+            clearTimeout(timeoutId);
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                return this._createError(
+                    "SESSION_TOKEN_FAILED",
+                    `ABDM Gateway session token request failed with status ${response.status}`,
+                    { status: response.status, details: errorData.message || errorData.error || null }
+                );
+            }
+
+            const data = await response.json();
+            const accessToken = data.accessToken || data.token;
+            const expiresIn = data.expiresIn || 1200; // default 20 minutes if omitted
+
+            if (!accessToken) {
+                return this._createError(
+                    "INVALID_SESSION_RESPONSE",
+                    "Gateway session response did not include a valid access token."
+                );
+            }
+
+            this.cachedGatewayToken = accessToken;
+            this.tokenExpiresAt = Date.now() + (expiresIn * 1000);
+
+            return { success: true, token: this.cachedGatewayToken };
+        } catch (err) {
+            if (err.name === "AbortError") {
+                return this._createError(
+                    "GATEWAY_TIMEOUT",
+                    `Gateway session token request timed out after ${config.requestTimeoutMs}ms`
+                );
+            }
+            return this._createError(
+                "GATEWAY_NETWORK_ERROR",
+                "Failed to communicate with ABDM Gateway session endpoint.",
+                { message: err.message }
+            );
+        }
     }
 
     /**
-     * Initiates ABHA authentication (e.g., sending Mobile or Aadhaar OTP).
+     * Internal HTTP executor for ABDM v1 endpoints.
+     * Handles auth headers, timeouts, and error normalization.
      * 
-     * STATUS: UNIMPLEMENTED (Awaiting official sandbox access)
-     * 
-     * Expected ABDM flow (M1):
-     * Staff provides 14-digit ABHA number or ABHA address (@abdm).
-     * The gateway responds with a `transactionId` and masked mobile number.
-     * 
-     * @param {Object} params
-     * @param {string} params.abhaIdentifier - The ABHA number or address
-     * @param {string} [params.authMode] - Authentication mode ("MOBILE_OTP", "AADHAAR_OTP", etc.)
-     * @returns {Promise<Object>} Verification session initiation result
+     * @private
      */
-    async initiateAuth({ abhaIdentifier, authMode = "MOBILE_OTP" }) {
+    async _executeRequest({ endpointPath, method, body = null, extraHeaders = {}, requiresAuth = true }) {
         if (!isAbdmConfigured()) {
             return this._createError(
                 "ABDM_NOT_CONFIGURED",
-                "ABDM Gateway integration is pending sandbox registration approval. Live authentication cannot be initiated."
+                "ABDM Gateway credentials are not configured in environment variables. Live gateway calls are blocked pending sandbox approval."
             );
         }
 
-        if (!abhaIdentifier || typeof abhaIdentifier !== "string") {
+        const config = getAbdmConfig();
+        const targetUrl = this._resolveUrl(endpointPath);
+        const headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "X-CM-ID": config.cmId,
+            ...extraHeaders
+        };
+
+        if (requiresAuth) {
+            const tokenResult = await this.getGatewaySessionToken();
+            if (!tokenResult.success) {
+                return tokenResult;
+            }
+            headers["Authorization"] = `Bearer ${tokenResult.token}`;
+        }
+
+        try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), config.requestTimeoutMs);
+
+            const options = {
+                method,
+                headers,
+                signal: controller.signal
+            };
+
+            if (body && (method === "POST" || method === "PUT" || method === "PATCH")) {
+                options.body = JSON.stringify(body);
+            }
+
+            const response = await fetch(targetUrl, options);
+            clearTimeout(timeoutId);
+
+            const isJson = response.headers.get("content-type")?.includes("application/json");
+            const responseData = isJson ? await response.json() : await response.text();
+
+            if (!response.ok) {
+                return this._createError(
+                    `GATEWAY_HTTP_${response.status}`,
+                    `Gateway endpoint ${endpointPath} returned HTTP ${response.status}`,
+                    {
+                        status: response.status,
+                        gatewayMessage: typeof responseData === "object" ? (responseData.message || responseData.error || responseData.details) : responseData
+                    }
+                );
+            }
+
+            return {
+                success: true,
+                data: responseData
+            };
+        } catch (err) {
+            if (err.name === "AbortError") {
+                return this._createError(
+                    "GATEWAY_TIMEOUT",
+                    `ABDM Gateway call to ${endpointPath} timed out after ${config.requestTimeoutMs}ms`
+                );
+            }
             return this._createError(
-                "INVALID_IDENTIFIER",
-                "A valid ABHA number or ABHA address is required."
+                "GATEWAY_CONNECTION_ERROR",
+                `Failed to connect to ABDM Gateway at ${endpointPath}: ${err.message}`
             );
         }
-
-        /**
-         * PENDING OFFICIAL VERIFICATION:
-         * Official gateway endpoint: /v0.5/users/auth/init
-         * Live call deferred until credentials are provided.
-         */
-        return this._createError(
-            "GATEWAY_PENDING_APPROVAL",
-            "ABDM Gateway authentication initiation is pending official sandbox credentials."
-        );
     }
 
-    /**
-     * Submits an OTP to confirm patient identity.
-     * 
-     * STATUS: UNIMPLEMENTED (Awaiting official sandbox access)
-     * 
-     * CRITICAL SECURITY INSTRUCTION:
-     * - The `otp` value must never be logged or persisted anywhere in logs or database.
-     * - It must only be relayed in-memory over HTTPS directly to the official gateway.
-     * 
-     * @param {Object} params
-     * @param {string} params.transactionId - The gateway transaction reference ID
-     * @param {string} params.otp - The 6-digit numeric OTP entered by patient
-     * @returns {Promise<Object>} Verification confirmation result
-     */
-    async confirmAuthOtp({ transactionId, otp }) {
-        if (!isAbdmConfigured()) {
-            return this._createError(
-                "ABDM_NOT_CONFIGURED",
-                "ABDM Gateway integration is pending sandbox registration approval."
-            );
+    // =========================================================================
+    // FINALIZED API 1: v1/search/searchByHealthId
+    // Purpose: Search for an existing ABHA account by Health ID or ABHA Address
+    // =========================================================================
+    async searchByHealthId({ healthId }) {
+        if (!healthId || typeof healthId !== "string" || !healthId.trim()) {
+            return this._createError("INVALID_HEALTH_ID", "A non-empty healthId parameter is required.");
         }
 
-        if (!transactionId || typeof transactionId !== "string") {
-            return this._createError(
-                "INVALID_TRANSACTION",
-                "Transaction ID is missing or invalid."
-            );
-        }
-
-        if (!otp || !/^\d{6}$/.test(otp)) {
-            return this._createError(
-                "INVALID_OTP_FORMAT",
-                "OTP must be a 6-digit numeric string."
-            );
-        }
-
-        /**
-         * PENDING OFFICIAL VERIFICATION:
-         * Official gateway endpoint: /v0.5/users/auth/confirm
-         * Live call deferred until credentials are provided.
-         */
-        return this._createError(
-            "GATEWAY_PENDING_APPROVAL",
-            "ABDM Gateway OTP verification is pending official sandbox credentials."
-        );
+        return this._executeRequest({
+            endpointPath: "v1/search/searchByHealthId",
+            method: "POST",
+            body: {
+                healthId: healthId.trim()
+            },
+            requiresAuth: true
+        });
     }
 
-    /**
-     * Fetches authorized demographic profile for a verified ABHA session.
-     * 
-     * STATUS: UNIMPLEMENTED (Awaiting official sandbox access)
-     * 
-     * Expected ABDM flow (M1):
-     * Upon successful OTP confirmation, the gateway provides or permits fetching the user profile.
-     * Profile includes: name, gender, dob/yearOfBirth, mobile, address, and ABHA address.
-     * 
-     * @param {Object} params
-     * @param {string} params.transactionId - The gateway transaction reference ID
-     * @param {string} [params.userAuthToken] - Temporary user authentication token if required by gateway
-     * @returns {Promise<Object>} Patient profile retrieval result
-     */
-    async getPatientProfile({ transactionId, userAuthToken = null }) {
-        if (!isAbdmConfigured()) {
+    // =========================================================================
+    // FINALIZED API 2: v1/auth/init
+    // Purpose: Start the supported authentication flow (requests OTP)
+    // =========================================================================
+    async initAuth({ authMethod, healthid }) {
+        if (!healthid || typeof healthid !== "string" || !healthid.trim()) {
+            return this._createError("INVALID_HEALTH_ID", "A non-empty healthid parameter is required.");
+        }
+
+        const validAuthMethods = ["MOBILE_OTP", "AADHAAR_OTP", "DEMOGRAPHIC", "PASSWORD"];
+        const selectedMethod = authMethod || "MOBILE_OTP";
+
+        if (!validAuthMethods.includes(selectedMethod)) {
             return this._createError(
-                "ABDM_NOT_CONFIGURED",
-                "ABDM Gateway integration is pending sandbox registration approval."
+                "INVALID_AUTH_METHOD",
+                `Invalid authMethod: ${selectedMethod}. Must be one of: ${validAuthMethods.join(", ")}`
             );
         }
 
-        /**
-         * PENDING OFFICIAL VERIFICATION:
-         * Official gateway endpoint: /v0.5/users/auth/on-confirm or profile retrieval endpoint.
-         * Live call deferred until credentials are provided.
-         */
-        return this._createError(
-            "GATEWAY_PENDING_APPROVAL",
-            "ABDM profile retrieval is pending official sandbox credentials."
-        );
+        return this._executeRequest({
+            endpointPath: "v1/auth/init",
+            method: "POST",
+            body: {
+                authMethod: selectedMethod,
+                healthid: healthid.trim()
+            },
+            requiresAuth: true
+        });
+    }
+
+    // =========================================================================
+    // FINALIZED API 3: v1/auth/confirmWithMobileOTP
+    // Purpose: Complete mobile OTP authentication
+    // SECURITY: The otp parameter is NEVER logged.
+    // =========================================================================
+    async confirmWithMobileOTP({ transactionId, otp }) {
+        if (!transactionId || typeof transactionId !== "string" || !transactionId.trim()) {
+            return this._createError("INVALID_TRANSACTION_ID", "transactionId is required.");
+        }
+
+        if (!otp || !/^\d{6}$/.test(String(otp).trim())) {
+            return this._createError("INVALID_OTP_FORMAT", "OTP must be a 6-digit numeric string.");
+        }
+
+        return this._executeRequest({
+            endpointPath: "v1/auth/confirmWithMobileOTP",
+            method: "POST",
+            body: {
+                transactionId: transactionId.trim(),
+                otp: String(otp).trim()
+            },
+            requiresAuth: true
+        });
+    }
+
+    // =========================================================================
+    // FINALIZED API 4: v1/auth/confirmWithAadhaarOtp
+    // Purpose: Alternative Aadhaar OTP confirmation
+    // SECURITY: The otp parameter is NEVER logged.
+    // =========================================================================
+    async confirmWithAadhaarOtp({ transactionId, otp }) {
+        if (!transactionId || typeof transactionId !== "string" || !transactionId.trim()) {
+            return this._createError("INVALID_TRANSACTION_ID", "transactionId is required.");
+        }
+
+        if (!otp || !/^\d{6}$/.test(String(otp).trim())) {
+            return this._createError("INVALID_OTP_FORMAT", "OTP must be a 6-digit numeric string.");
+        }
+
+        return this._executeRequest({
+            endpointPath: "v1/auth/confirmWithAadhaarOtp",
+            method: "POST",
+            body: {
+                transactionId: transactionId.trim(),
+                otp: String(otp).trim()
+            },
+            requiresAuth: true
+        });
+    }
+
+    // =========================================================================
+    // FINALIZED API 5: v1/account/profile
+    // Purpose: Retrieve profile information after successful authorization
+    // Header requirement: X-Token (User authentication token returned post-OTP)
+    // =========================================================================
+    async getAccountProfile({ userToken }) {
+        if (!userToken || typeof userToken !== "string" || !userToken.trim()) {
+            return this._createError("INVALID_USER_TOKEN", "Valid user authorization token (X-Token) is required to fetch profile.");
+        }
+
+        const cleanToken = userToken.trim().replace(/^Bearer\s+/i, "");
+
+        return this._executeRequest({
+            endpointPath: "v1/account/profile",
+            method: "GET",
+            extraHeaders: {
+                "X-Token": `Bearer ${cleanToken}`
+            },
+            requiresAuth: true
+        });
+    }
+
+    // =========================================================================
+    // FINALIZED API 6: v1/auth/cert
+    // Purpose: Obtain the public certificate if required by authentication / encryption
+    // =========================================================================
+    async getAuthCert() {
+        return this._executeRequest({
+            endpointPath: "v1/auth/cert",
+            method: "GET",
+            requiresAuth: false // Public certificate endpoint does not strictly require user bearer token
+        });
     }
 }
 
-// Export a singleton instance of the gateway service
+// Export singleton instance of ABDM Gateway Service
 module.exports = new AbdmGatewayService();
