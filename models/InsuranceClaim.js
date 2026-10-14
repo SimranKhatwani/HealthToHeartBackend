@@ -52,7 +52,17 @@ const InsuranceClaimSchema = new mongoose.Schema(
     },
     governmentId: {
       type: String,
-      required: true,
+      required: false,
+    },
+    claimCategory: {
+      type: String,
+      enum: ["PATIENT_ID", "ABHA"],
+      default: "PATIENT_ID",
+    },
+    abhaNumber: {
+      type: String,
+      default: null,
+      trim: true,
     },
   },
   { timestamps: true }

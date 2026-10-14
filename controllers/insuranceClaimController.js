@@ -9,17 +9,39 @@ exports.createInsuranceClaim = async (req, res) => {
         // const { userId, org_id } = await getUserFromToken(req);
         const org_id = req.user.org_id;
         const userId = req.user._id;
-        const { patientId, providerId, service, amount, governmentId, status, notes } = req.body;
+        const {
+            patientId,
+            providerId,
+            service,
+            amount,
+            governmentId,
+            status,
+            notes,
+            claimCategory,
+            abhaNumber
+        } = req.body;
+
+        if (!patientId || !providerId || !service || amount === undefined || amount === null) {
+            return res.status(400).json({ error: "Missing required claim fields: patientId, providerId, service, and amount are required." });
+        }
+
+        if (claimCategory === "ABHA" && (!abhaNumber || typeof abhaNumber !== "string" || !abhaNumber.trim())) {
+            return res.status(400).json({ error: "A valid ABHA number is required for claims created through the ABHA category." });
+        }
+
+        const normalizedCategory = claimCategory === "ABHA" ? "ABHA" : "PATIENT_ID";
 
         const claim = new InsuranceClaim({
             patientId,
             providerId,
             service,
             amount,
-            status,
+            status: status || "pending",
             notes,
             org_id,
-            governmentId,
+            governmentId: governmentId || (normalizedCategory === "ABHA" ? abhaNumber.trim() : ""),
+            claimCategory: normalizedCategory,
+            abhaNumber: normalizedCategory === "ABHA" ? abhaNumber.trim() : null,
             createdBy: userId
         });
         //check the paitent and provider exist
