@@ -1,23 +1,4 @@
-/**
- * ABDM Gateway Service
- * 
- * Reusable internal service layer for communication with the official ABDM (Ayushman Bharat Digital Mission)
- * Gateway / Health ID v1 APIs.
- * 
- * FINALIZED API SCOPE (v1 Legacy Specification):
- * 1. v1/search/searchByHealthId    - Search for an existing ABHA account by Health ID / ABHA Address
- * 2. v1/auth/init                  - Initiate authentication (e.g., requesting Mobile or Aadhaar OTP)
- * 3. v1/auth/confirmWithMobileOTP  - Complete authentication by submitting Mobile OTP
- * 4. v1/auth/confirmWithAadhaarOtp - Alternative authentication by submitting Aadhaar OTP
- * 5. v1/account/profile            - Retrieve verified patient profile using the X-Token post-auth
- * 6. v1/auth/cert                  - Obtain the gateway public certificate for encryption flows
- * 
- * SECURITY & INTEGRITY CONSTRAINTS:
- * - Credentials and tokens are kept strictly server-side.
- * - OTP values are NEVER logged, printed, or persisted in application logs.
- * - When sandbox credentials are not configured in .env, live network calls are safely blocked.
- * - Does not invent fake patient data or simulate verification when sandbox is offline.
- */
+
 
 const { getAbdmConfig, isAbdmConfigured } = require("../config/abdmConfig");
 

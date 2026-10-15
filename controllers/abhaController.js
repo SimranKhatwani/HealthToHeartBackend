@@ -1,26 +1,4 @@
-/**
- * ABHA Integration Controller
- * 
- * Handles internal hospital application requests for ABHA verification operations,
- * mapping them to the ABDM v1 gateway service while enforcing organization isolation,
- * staff authentication, session expiry, and candidate patient matching.
- * 
- * MAPPED OFFICIAL GATEWAY OPERATIONS:
- * 1. searchAccount       -> v1/search/searchByHealthId
- * 2. initiateAuth        -> v1/auth/init
- * 3. confirmMobileOTP    -> v1/auth/confirmWithMobileOTP
- * 4. confirmAadhaarOtp   -> v1/auth/confirmWithAadhaarOtp
- * 5. getProfile          -> v1/account/profile
- * 6. getPublicCert       -> v1/auth/cert
- * 
- * SECURITY RULES:
- * - Handlers require authenticated staff (`req.user` populated via verifyTokenUser).
- * - Multi-tenant isolation: All sessions are scoped by `req.user.org_id`.
- * - OTP values are NEVER logged or written to MongoDB.
- * - Does not return patient profile data before successful authentication.
- * - Does not automatically create or mutate patient records.
- * - Never returns fabricated patient profiles when gateway is offline or unconfigured.
- */
+
 
 const abdmGatewayService = require("../services/abdmGatewayService");
 const AbhaVerificationSession = require("../models/AbhaVerificationSession");
